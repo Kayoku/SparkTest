@@ -56,26 +56,31 @@ cb = NaiveBayes(smoothing=1.0, modelType="multinomial",featuresCol = "images",la
 #random forest
 rf = RandomForestClassifier(numTrees=50,featuresCol="images",labelCol = "labels", predictionCol="predict_rf")
 
+#multiplayer perceptron
+layers = [784, 128, 128, 10]
+mlp = MultilayerPerceptronClassifier(maxIter=100, layers=layers, blockSize=128, seed=1234, featuresCol="images",labelCol = "labels", predictionCol="predict_mlp")
 
 
 #
 # PIPELINE
 #
 
-pipeline = Pipeline(stages=[lr,cb,rf])
+pipeline = Pipeline(stages=[lr,cb,rf,mlp])
 model = pipeline.fit(train)
 
 
-# 
+#
 # TEST MODEL
 #
 
+
 predict = model.transform(test)
-predict.select("labels","predict_lr","predict_bc","predict_rf").show(20)
+predict.select("labels","predict_lr","predict_bc","predict_rf","predict_mlp").show(20)
 
 #
 # EVALUATION
+#
 
-evalCol= [("predict_lr","accuracy_lr"),("predict_bc","accuracy_bc"),("predict_rf","accuracy_rf")]
+evalCol= [("predict_lr","accuracy_lr"),("predict_bc","accuracy_bc"),("predict_rf","accuracy_rf"),("predict_mlp","accuracy_mlp")]
 evaluation = [MulticlassClassificationEvaluator(labelCol="labels",predictionCol=evalCol[x][0],metricName="accuracy") for x in range(len(evalCol))]
 [print(evalCol[x][1] +" : " + str(evaluation[x].evaluate(predict))) for x in range(len(evaluation))]
