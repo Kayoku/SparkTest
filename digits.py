@@ -4,79 +4,78 @@ from pyspark.sql import *
 from pyspark.ml import Pipeline
 from pyspark.ml.classification import NaiveBayes
 from pyspark.ml.linalg import Vectors
+from pyspark.ml.classification import LinearSVC
 from pyspark.ml.classification import LogisticRegression
 from pyspark.ml.classification import MultilayerPerceptronClassifier
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+from pyspark.ml.classification import RandomForestClassifier
+from pyspark.ml.classification import DecisionTreeClassifier
+from sklearn.datasets import fetch_mldata
+from pyspark.mllib.evaluation import MultilabelMetrics
 
 import numpy as np
+import random
 
-digits = datasets.load_digits()
-
-data = digits.data[100:]
-labels = digits.target[100:]
-
-# 1797 x 2
-datafr = []
-for i in range(len(data)):
-    datafr.append((int(labels[i]), Vectors.dense(data[i].tolist())))
-
+#init spark
 sc = SparkContext()
 sqlContext = SQLContext(sc)
+sc.setLogLevel('ERROR')
 
-# train data
-train = sqlContext.createDataFrame(datafr, ["labels", "images"])
+#
+# DATA
+#
+
+
+mnist = fetch_mldata('MNIST original',data_home='/home/m2mocad/deleruyelle/Documents/MOCAD/TLDE/SparkTest/data')
+
+data = mnist.data
+labels = mnist.target
+
+dataframe = [(int(labels[x]),Vectors.dense(data[x].tolist())) for x in range(len(data))]
+random.shuffle(dataframe)
+
+train = sqlContext.createDataFrame(dataframe[60000:], ["labels", "images"])
 train.show(20)
 
+test = sqlContext.createDataFrame(dataframe[:10000], ["labels", "images"])
+test.show(20)
 
 
-lr = LogisticRegression(maxIter=3000, regParam=0.1,labelCol="labels",rawPredictionCol = "rPredict",featuresCol = "images",predictionCol = "p_nl",probabilityCol = "proba_nl")
+#
+# CLASSIFIER
+#
 
-"""
-#multilayer perceptron
-layers = [4, 15, 15, 15, 10]
-lrNL = MultilayerPerceptronClassifier(maxIter=100, layers=layers)
-"""
+#logistic regression
+lr = LogisticRegression(maxIter=500, regParam=0.05,featuresCol = "images",labelCol="labels",predictionCol = "predict_lr",rawPredictionCol = "rpc_lr",probabilityCol = "proba_lr")
 
 
 # bayes classifier
-nb = NaiveBayes(smoothing=1.0, modelType="multinomial", predictionCol="p_nb", featuresCol = "images",labelCol="labels")
+cb = NaiveBayes(smoothing=1.0, modelType="multinomial",featuresCol = "images",labelCol="labels", predictionCol="predict_bc",rawPredictionCol = "rpc_bc",probabilityCol = "proba_bc")
 
 
-# create pipeline and fit
-pipeline = Pipeline(stages=[lr,nb])
+#random forest
+rf = RandomForestClassifier(numTrees=50,featuresCol="images",labelCol = "labels", predictionCol="predict_rf")
+
+
+
+#
+# PIPELINE
+#
+
+pipeline = Pipeline(stages=[lr,cb,rf])
 model = pipeline.fit(train)
 
 
+# 
+# TEST MODEL
+#
 
-data_test = digits.data[:100]
-labels_test = digits.target[:100]
+predict = model.transform(test)
+predict.select("labels","predict_lr","predict_bc","predict_rf").show(20)
 
-# 100 x 2
-datatest = []
-for i in range(len(data_test)):
-    datatest.append((int(labels_test[i]), Vectors.dense(data_test[i].tolist())))
+#
+# EVALUATION
 
-set_test = sqlContext.createDataFrame(datatest, ["labels", "images"])
-
-
-
-# transform on test
-prediction = model.transform(set_test)
-prediction.show(50)
-"""
-probas = []
-selected = prediction.select("label", "prediction")
-selectedNL = predictionNL.select("label", "prediction")
-
-probas.append(0)
-for row in selected.collect():
-    lbl, prediction = row
-    if prediction == lbl:
-        probas[0]+=1
-
-probas.append(0)
-for row in selectedNL.collect():
-    lbl, prediction = row
-    if prediction == lbl:
-        probas[0]+=1
-print(probas)
-"""
+evalCol= [("predict_lr","accuracy_lr"),("predict_bc","accuracy_bc"),("predict_rf","accuracy_rf")]
+evaluation = [MulticlassClassificationEvaluator(labelCol="labels",predictionCol=evalCol[x][0],metricName="accuracy") for x in range(len(evalCol))]
+[print(evalCol[x][1] +" : " + str(evaluation[x].evaluate(predict))) for x in range(len(evaluation))]
